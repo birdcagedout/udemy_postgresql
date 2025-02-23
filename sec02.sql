@@ -3,7 +3,12 @@
 
 
 
--- 6. Creating a Database User (adam)
+-- 6. Creating a Database ROLE (adam)
+--    Role은 하나의 사용자를 뜻하는 user ID일 수도 있고, 여러 사용자를 묶어놓은 user group의 개념일 수도 있다.
+--    따라서 아래 7번과 같이 database의 owner를 adam으로 하여 생성하려고 하는 경우,
+--    현재 사용자 ID가 adam이 아닌 경우 에러가 발생한다.
+--    따라서 6.5번과 같이 adam이라는 ROLE을 현재 user인 postgres에게 부여하여
+--    마치 postgres라는 user는 adam이라는 group의 멤버인 것처럼 ROLE을 사용할 수 있다. 
 CREATE ROLE adam WITH
 	LOGIN
 	NOSUPERUSER
@@ -16,6 +21,21 @@ CREATE ROLE adam WITH
 	PASSWORD 'xxxxxx';
 
 
+-- 6.5 Role을 만들고 나면
+-- 현재 user(예를 들어 postgres 계정으로 로그인한 경우)를 adam ROLE에 추가하여야 한다.
+-- 그래야 아래 7번과 같이 learning이라는 database를 adam 소유로 생성할 수 있다.
+GRANT adam TO postgres;
+
+
+
+-- 현재 adam이라는 ROLE을 가진 모든 사용자를 보고 싶다면
+SELECT member_role.rolname AS member
+FROM pg_auth_members
+JOIN pg_roles AS member_role ON pg_auth_members.member = member_role.oid
+JOIN pg_roles AS role_role ON pg_auth_members.roleid = role_role.oid
+WHERE role_role.rolname = 'adam';
+
+
 
 -- 7. Creating a Database (adam소유의 learning이라는 database ==> 실습은 여기서)
 CREATE DATABASE learning
@@ -25,6 +45,12 @@ CREATE DATABASE learning
     LOCALE_PROVIDER = 'libc'
     CONNECTION LIMIT = -1
     IS_TEMPLATE = False;
+
+
+-- 이제부터는 learning 데이터베이스로 변경해야 한다.
+-- psql에서 \c learning 하거나
+-- pgadmin에서는 learning에서 우클릭 후 query tool을 연다.
+
 
 
 
@@ -275,7 +301,12 @@ hr=# select * from regions;
 
 -- 11. Install sample stocks market data
 -- 1) learning으로 데이터베이스를 바꾼 후에
+\c learning
+
+
+
 -- 2) stocks_symbols.sql 실행
+
 
 /*
 hr=# \c learning
