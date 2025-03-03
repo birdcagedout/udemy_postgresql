@@ -410,6 +410,44 @@ select book_info['publisher'] from table_hstore;
 
 
 -- 7) JSON
+--    1. postgresql has built-in support for JSON
+--    2. JSON은 알고보면 text 타입이다
+--    3. JSONB는 binary version of JSON
+--    4. JSON은 text 그 자체를 그대로 저장한다(space, tab, indentation 등)
+--    5. JSONB는 binary data라서 space나 indentation등이 무시될 수도 있다.
+--    결론: 원본 json 포맷을 그대로 보존해야 하는 경우만 json을 사용하고, 나머지는 jsonb 사용
+
+create table table_json (
+	id 		serial		primary key,
+	docs 	JSON
+);
+
+insert into table_json (docs) values
+('[1,2, 3,4, 5,6]'),		-- k,v
+('[2,3, 4,5, 6,7]'),		-- k,v
+('{"key": "value"}');		-- k:v
 
 
+select * from table_json;
 
+
+-- @> 연산자는 json 타입에는 지원되지 않고, jsonb 타입에서만 지원된다.
+select * 
+from table_json
+where docs @> '2';
+
+
+-- 굳이 이렇게 사용할 수는 있으나 권장되지는 않고
+select * 
+from table_json
+where docs::jsonb @> '[2]'::jsonb;
+
+
+-- 차라리 jsonb를 사용하거라
+alter table table_json
+alter column docs
+type jsonb;
+
+
+-- jsonb를 사용하니까 index를 사용할 수 있다
+create index on table_json using GIN (docs jsonb_path_ops);
