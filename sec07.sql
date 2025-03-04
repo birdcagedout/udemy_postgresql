@@ -409,7 +409,12 @@ select book_info['publisher'] from table_hstore;
 
 
 
--- 7) JSON
+-- 7) JSON: (https://www.rfc-editor.org/rfc/rfc8259)
+--			정의) JSON is a text format for the serialization of structured data. ==> 통신, 저장
+--			JSON can represent four primitive types (strings, numbers, booleans, and null) 
+--          and two structured types (objects and arrays).
+
+--    Postgresql에서의 JSON
 --    1. postgresql has built-in support for JSON
 --    2. JSON은 알고보면 text 타입이다
 --    3. JSONB는 binary version of JSON
@@ -422,16 +427,59 @@ create table table_json (
 	docs 	JSON
 );
 
+
+
+-- json 타입의 값을 표현할 때는 반드시 홑따옴표('')로 묶어주어야 한다. ==> 예외 없음
 insert into table_json (docs) values
-('[1,2, 3,4, 5,6]'),		-- k,v
-('[2,3, 4,5, 6,7]'),		-- k,v
-('{"key": "value"}');		-- k:v
+('[1,2, 3,4, 5,6]'),		-- k,v Array 형식일 때는 key가 반드시 ""로 감싸질 필요가 없다
+('{"key": "value"}');		-- k:v 이 경우 key는 반드시 ""로 감싸져야 한다. value가 string일 때도 당연히 ""으로 감싸야 한다
+
+
+-- k:v 형태일 때 value가 string이 아니라면 value는 ""으로 감싸지 않아도 된다
+insert into table_json (docs) values
+('{"k": 1}');
+
+
+-- 이렇게 홑따옴표로 묶지 않으면 ERROR
+insert into table_json (docs) values
+([10,20, 30,40, 50,60]);
+
+
+-- 이렇게 string을 홑따옴표로 묶어도 ERROR
+insert into table_json (docs) values
+('{"key2": 'value2'}');
+
+
+-- json에는 단일한 primitive 값을 넣을 수도 있다. (k:v쌍만 들어가는 게 아니다)
+-- 단, json 데이터는 SQL문자열 리터럴, 다시말해 ''으로 감싸야 하는데, ''의 내부가 유효한 string이려면 "hello"여야 한다.
+-- 즉, json 데이터는 '"hello~"'여야 한다.
+
+insert into table_json (docs) values		-- ERROR
+('hello~');
+
+insert into table_json (docs) values		-- OK
+('"hello~"');
+
+
+-- 그럼 단일한 primitive 타입인 숫자, null 등은 ""가 필요없을까? ==> 그렇다. 필요없다.
+insert into table_json (docs) values
+('10');
+
+insert into table_json (docs) values
+('null');
+
+insert into table_json (docs) values
+('0.314');
+
+-- 그럼에도 불구하고 "100"이라는 string을 표현하고 싶다면 ""로 감싸도 된다.
+insert into table_json (docs) values
+('"100"');
 
 
 select * from table_json;
 
 
--- @> 연산자는 json 타입에는 지원되지 않고, jsonb 타입에서만 지원된다.
+-- ERROR: @> 연산자는 json 타입에는 지원되지 않고, jsonb 타입에서만 지원된다.
 select * 
 from table_json
 where docs @> '2';
@@ -451,3 +499,82 @@ type jsonb;
 
 -- jsonb를 사용하니까 index를 사용할 수 있다
 create index on table_json using GIN (docs jsonb_path_ops);
+
+
+
+
+-- 8) network addresses 타입
+
+/* 주로 cidr이나 inet만 쓰게 될 거다
+이름			저장 사이즈				특징
+------------------------------------------------------------------
+cidr		7 or 19 bytes			IPv4 & IPv6 networks (네크워크만 저장가능. host부분이 모두 0이어야 한다)
+inet		7 or 19 bytes			IPv4 & IPv6 hosts and networks (host부분이 모두 0이 아니어도 된다)
+macdddr		6 bytes					MAC address
+macaddr8	8 bytes					MAC address (EUI-64 format)
+*/
+
+
+-- netmask를 알고가자
+-- /24는 앞부터 24bit(3byte)까지가 네트워크 주소이고, 그 이하는 host 주소라는 의미
+-- 예를 들어 192.168.0.1/24인 경우 이 네트워크는 192.168.0.1 ~ 192.168.0.254 범위의 host를 가진 네트워크라는 의미
+-- (맨 끝의 0은 네트워크 주소이고, 255는 broadcast 주소이므로 제외)
+
+
+-- 두가지의 차이를 보고 싶다면
+SELECT '192.168.1.10/24'::inet;		-- host 주소까지 모두 저장 가능
+SELECT '192.168.1.10/24'::cidr;		-- ERROR: invalid cidr value: "192.168.1.10/24". Value has bits set to right of mask. 
+SELECT '192.168.1.0/24'::cidr;			-- 이렇게 해줘야 저장 가능
+
+
+
+create table table_netaddr (
+	id		serial		primary key,
+	ip		inet
+);
+
+
+insert into table_netaddr(ip) values
+('4.35.221.243'),
+('4.152.207.126'),
+('4.152.207.238'),
+('4.249.111.162'),
+('12.1.223.132'),
+('12.8.192.60');
+
+
+select * from table_netaddr;
+
+
+
+-- netmask를 적용한 형태로 변경
+-- 즉, 개별 host ip(192.168.0.1)를 네트워크 주소를 포함하는 형태로 변환하기
+select 
+	ip,
+	set_masklen(ip, 24) as inet_24
+from table_netaddr;
+
+
+
+-- 하지만, 위의 예는 진정한 inet -> cidr이 아니다.
+-- cidr은 host부분(mask의 오른쪽 숫자)이 모두 0이어야 하기 때문이다.
+-- 이번엔 진짜 inet -> cidr 변환을 해보자
+select 
+	ip,
+	set_masklen(ip, 24) as inet_24,
+	set_masklen(ip::cidr, 24) as cidr_24		-- 진짜 cidr
+from table_netaddr;
+
+
+
+-- 위의 작업을 mask를 증가시키면서 살펴보자
+select 
+	ip,
+	set_masklen(ip, 24) as inet_24,
+	set_masklen(ip::cidr, 24) as cidr_24,		-- 진짜 cidr
+	set_masklen(ip::cidr, 25) as cidr_24,		-- 진짜 cidr
+	set_masklen(ip::cidr, 26) as cidr_24,		-- 진짜 cidr
+	set_masklen(ip::cidr, 27) as cidr_24,		-- 진짜 cidr
+	set_masklen(ip::cidr, 28) as cidr_24		-- 진짜 cidr
+from table_netaddr;
+
